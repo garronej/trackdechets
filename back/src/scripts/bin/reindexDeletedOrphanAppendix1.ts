@@ -17,8 +17,7 @@ async function exitScript() {
 
   const where: Prisma.FormWhereInput = {
     emitterType: EmitterType.APPENDIX1_PRODUCER,
-    isDeleted: true,
-    groupedIn: { none: {} }
+    isDeleted: true
   };
   const orphansCount = await prisma.form.count({ where });
 

@@ -24,6 +24,7 @@ import getReadableId from "../../../readableId";
 import { getFirstTransporter } from "../../../database";
 import { updateAppendix2Queue } from "../../../../queue/producers/updateAppendix2";
 import { waitForJobsCompletion } from "../../../../queue/helpers";
+import { fr } from "date-fns/locale";
 
 // No mails
 jest.mock("../../../../mailer/mailing");
@@ -174,7 +175,6 @@ describe("Test Form reception", () => {
     });
 
     const frm = await prisma.form.findUniqueOrThrow({ where: { id: form.id } });
-
     expect(frm.status).toBe("ACCEPTED");
     expect(frm.wasteAcceptationStatus).toBe("ACCEPTED");
     expect(frm.receivedBy).toBe("Bill");
@@ -182,6 +182,59 @@ describe("Test Form reception", () => {
 
     // when form is received, we clean up currentTransporterOrgId
     expect(frm.currentTransporterOrgId).toEqual("");
+
+    // A StatusLog object is created
+    const logs = await prisma.statusLog.findMany({
+      where: { form: { id: frm.id }, user: { id: recipient.id } }
+    });
+    expect(logs.length).toBe(1);
+    expect(logs[0].status).toBe("ACCEPTED");
+  });
+
+  it("BUG: it should not mark a sent form as accepted if wasteAcceptationStatus is ACCEPTED but quantityReceived is missing", async () => {
+    const {
+      emitterCompany,
+      recipient,
+      recipientCompany,
+      form: initialForm
+    } = await prepareDB();
+    const form = await prisma.form.update({
+      where: { id: initialForm.id },
+      data: { currentTransporterOrgId: siretify(3) }
+    });
+    await prepareRedis({
+      emitterCompany,
+      recipientCompany
+    });
+
+    const frm1 = await prisma.form.findUniqueOrThrow({
+      where: { id: form.id }
+    });
+    console.log(frm1);
+    expect(frm1.quantityReceivedType).toBeNull();
+    const { mutate } = makeClient(recipient);
+
+    await mutate(MARK_AS_RECEIVED, {
+      variables: {
+        id: form.id,
+        receivedInfo: {
+          receivedBy: "Bill",
+          receivedAt: "2019-01-17T10:22:00+0100",
+          signedAt: "2019-01-17T10:22:00+0100",
+          wasteAcceptationStatus: "ACCEPTED"
+          // quantityReceived not provided
+        }
+      }
+    });
+
+    const frm = await prisma.form.findUniqueOrThrow({
+      where: { id: form.id }
+    });
+    expect(frm.status).toBe("ACCEPTED");
+    expect(frm.wasteAcceptationStatus).toBe("ACCEPTED");
+    expect(frm.receivedBy).toBe("Bill");
+    expect(frm.quantityReceived).toBeNull();
+    expect(frm.quantityReceivedType).toBe("REAL");
 
     // A StatusLog object is created
     const logs = await prisma.statusLog.findMany({
